@@ -161,15 +161,16 @@ void loop() {
 #define PinTimer 3
 #define BUFFER_SIZE 32000
 #define DOWNSAMPLE_FACTOR 4
-#define FILTER_TAP_NUM 31
 #define OUTPUT_SIZE (BUFFER_SIZE / DOWNSAMPLE_FACTOR)
+#define FILTER_TAP_NUM 31
 
 volatile uint16_t buffer[BUFFER_SIZE];
-volatile uint16_t filteredBuffer[OUTPUT_SIZE];
+volatile uint16_t downsampledBuffer[OUTPUT_SIZE];
 volatile uint16_t bufferIndex = 0;
 volatile bool bufferReady = false;
 volatile int sampleIndex = 0;
 bool recording = false;
+bool applyFilter = false; // Variable pour activer/désactiver le filtre
 
 const int LED1 = 50;  // LED connectée à la pin D50
 const int LED2 = 51;  // LED connectée à la pin D51
@@ -242,14 +243,21 @@ void TC0_Handler() {
   }
 }
 
-void applyFIRFilter() {
-  for (int i = 0; i < OUTPUT_SIZE; i++) {
+void applyFIRFilter(uint16_t* inputBuffer, uint16_t* outputBuffer, int inputLength, int outputLength) {
+  for (int i = 0; i < outputLength; i++) {
     float filteredSample = 0.0;
     for (int j = 0; j < FILTER_TAP_NUM; j++) {
-      int bufferIndex = (i * DOWNSAMPLE_FACTOR + j) % BUFFER_SIZE;
-      filteredSample += firCoefficients[j] * buffer[bufferIndex];
+      int bufferIndex = (i * DOWNSAMPLE_FACTOR + j) % inputLength;
+      filteredSample += firCoefficients[j] * inputBuffer[bufferIndex];
     }
-    filteredBuffer[i] = (uint16_t)filteredSample;
+    outputBuffer[i] = (uint16_t)filteredSample;
+  }
+}
+
+void downsample(uint16_t* inputBuffer, uint16_t* outputBuffer, int inputLength, int factor) {
+  int outputIndex = 0;
+  for (int i = 0; i < inputLength; i += factor) {
+    outputBuffer[outputIndex++] = inputBuffer[i];
   }
 }
 
@@ -284,10 +292,15 @@ void setup() {
 
 void loop() {
   if (bufferReady) {
-    applyFIRFilter();
+    if (applyFilter) {
+      applyFIRFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, OUTPUT_SIZE);
+    } else {
+      downsample((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
+    }
+
     for (int i = 0; i < OUTPUT_SIZE; i++) {
-      Serial.println(filteredBuffer[i]);
-      // DACC->DACC_CDR = DACC_CDR_DATA(filteredBuffer[i]); // Décommenter si DAC utilisé
+      Serial.println(downsampledBuffer[i]);
+      // DACC->DACC_CDR = DACC_CDR_DATA(downsampledBuffer[i]); // Décommenter si DAC utilisé
     }
     bufferReady = false;
     digitalWrite(LED1, HIGH);
@@ -295,7 +308,6 @@ void loop() {
     Serial.println("Enregistrement terminé");
   }
 }
-
 
 
 
