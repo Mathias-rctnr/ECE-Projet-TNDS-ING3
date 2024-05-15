@@ -24,6 +24,6 @@ def convert_to_binary(input_path, output_path):
             f.write(binary)
 
 
-#convert_to_binary("/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/output.txt", "/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/output_binary.bin")
+convert_to_binary("/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/output.txt", "/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/output_binary.bin")
 convert_to_binary("/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/NonFiltre.txt", "/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/NonFiltre_binary.bin")
 convert_to_binary("/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/Filtre.txt", "/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/Filtre_binary.bin")
