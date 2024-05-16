@@ -162,10 +162,11 @@ void loop() {
 #include <Arduino.h>
 #include <math.h>
 
-#define PI 3.14159265358979323846
 #define BUFFER_SIZE 32000
 #define DOWNSAMPLE_FACTOR 4
 #define OUTPUT_SIZE (BUFFER_SIZE / DOWNSAMPLE_FACTOR)
+#define FRAME_SIZE 256
+#define OVERLAP_SIZE 128 // 50% overlap
 
 #define PinTimer 3
 #define FILTER_TAP_NUM 31
@@ -188,10 +189,48 @@ unsigned long lastButtonPress = 0; // Pour le debounce
 float b[3], a[3];
 float w[2] = {0.0, 0.0};  // État du filtre
 
+void calculerMFCC(uint16_t* frame, float* mfcc) {
+  // Fonction placeholder pour calculer les MFCC pour une frame donnée
+  // Implémenter le calcul des MFCC ici
+}
+
+void traiterFrames(uint16_t* buffer, int tailleBuffer, int tailleFrame, int tailleOverlap) {
+  int tailleStep = tailleFrame - tailleOverlap;
+  int nombreFrames = (tailleBuffer - tailleOverlap) / tailleStep;
+  float mfcc[13]; // Tableau placeholder pour les coefficients MFCC
+
+  for (int i = 0; i < nombreFrames; i++) {
+    uint16_t frame[FRAME_SIZE];
+    memcpy(frame, &buffer[i * tailleStep], tailleFrame * sizeof(uint16_t));
+    
+    // Vérification : Imprimer le contenu de la frame
+    Serial.print("Frame ");
+    Serial.print(i);
+    Serial.println(":");
+    for (int j = 0; j < FRAME_SIZE; j++) {
+      Serial.print(frame[j]);
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    calculerMFCC(frame, mfcc);
+
+    // Sortie des coefficients MFCC (par exemple, imprimer sur Serial)
+    Serial.print("MFCC Frame ");
+    Serial.print(i);
+    Serial.print(": ");
+    for (int j = 0; j < 13; j++) {
+      Serial.print(mfcc[j]);
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+}
+
 void calculateIIRCoefficients(float cutoffFreq, float sampleRate) {
   float normFreq = 2 * cutoffFreq / sampleRate;
   float theta = PI * normFreq;
-  float d = 1.0 / cos(theta);
+  //float d = 1.0 / cos(theta);
   float beta = 0.5 * ((1.0 - (0.5 * sin(theta))) / (1.0 + (0.5 * sin(theta))));
   float gamma = (0.5 + beta) * cos(theta);
   float alpha = (0.5 + beta - gamma) * 0.5;
@@ -217,7 +256,7 @@ void setupADC() {
   TC0->TC_CHANNEL[0].TC_CMR = TC_CMR_TCCLKS_TIMER_CLOCK4 | TC_CMR_CPCTRG;
   // Définit la source d'horloge à TCLK4 (MCK / 128, 84 MHz / 128 = 656.25 kHz)
   // Définit la valeur RC pour une fréquence samplingFrequency Hz 
-  TC0->TC_CHANNEL[0].TC_RC = 20; // 32kHz -> ( MCK / 128 / 32000 ) -> 20.5078125 -> 20
+  TC0->TC_CHANNEL[0].TC_RC = 21; // 32kHz -> ( MCK / 128 / 32000 ) -> 20.5078125 -> 20
   // Active l'interruption de comparaison RC
   TC0->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
   // Active l'interruption TC0_IRQn dans le NVIC
@@ -280,6 +319,7 @@ void downsampleAndFilter(uint16_t* inputBuffer, uint16_t* outputBuffer, int inpu
 }
 
 void startRecording() {
+  //delay(250);
   unsigned long currentTime = millis();
   if (currentTime - lastButtonPress > 200) { // Debounce check
     lastButtonPress = currentTime;
@@ -311,7 +351,7 @@ void setup() {
   digitalWrite(LED2, LOW);
 }
 
-void loop() {
+/* void loop() {
   if (bufferReady) {
     downsampleAndFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
 
@@ -319,6 +359,18 @@ void loop() {
       Serial.println(downsampledBuffer[i]);
       // DACC->DACC_CDR = DACC_CDR_DATA(downsampledBuffer[i]); // Décommenter si DAC utilisé
     }
+    bufferReady = false;
+    digitalWrite(LED1, HIGH);
+    digitalWrite(LED2, LOW);
+    Serial.println("Enregistrement terminé");
+  }
+} */
+
+void loop() {
+  if (bufferReady) {
+    downsampleAndFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
+    traiterFrames((uint16_t*)downsampledBuffer, OUTPUT_SIZE, FRAME_SIZE, OVERLAP_SIZE);
+    
     bufferReady = false;
     digitalWrite(LED1, HIGH);
     digitalWrite(LED2, LOW);
