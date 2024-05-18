@@ -1,9 +1,19 @@
-/* #include <Arduino.h>
+#include <Arduino.h>
+#include <math.h>
+#include <ArduinoFFT.h>
+#include "arduinoMFCC.h"
 
-#define PinTimer 3
 #define BUFFER_SIZE 32000
 #define DOWNSAMPLE_FACTOR 4
 #define OUTPUT_SIZE (BUFFER_SIZE / DOWNSAMPLE_FACTOR)
+#define FRAME_SIZE 256
+#define OVERLAP_SIZE 128 // 50% overlap
+
+#define MFCC_SIZE 13
+#define FREQ_ECH 8000
+#define DCT_MFCC_SIZE 7
+
+#define PinTimer 3
 #define FILTER_TAP_NUM 31
 
 volatile uint16_t buffer[BUFFER_SIZE];
@@ -20,211 +30,59 @@ const int bouton = 2; // Utilise D2 comme bouton
 
 unsigned long lastButtonPress = 0; // Pour le debounce
 
-const float firCoefficients[FILTER_TAP_NUM] = {
-  // Coefficients du filtre passe-bas (par exemple, conçu avec un outil de conception de filtre FIR)
-  -0.0012, -0.0022, -0.0043, -0.0076, -0.0116, -0.0156, -0.0187, -0.0195, 
-  -0.0162, -0.0074, 0.0090, 0.0334, 0.0652, 0.1025, 0.1424, 0.1811, 
-  0.2147, 0.2391, 0.2512, 0.2496, 0.2343, 0.2065, 0.1694, 0.1270, 
-  0.0841, 0.0454, 0.0153, -0.0040, -0.0124, -0.0105, -0.0009
-};
-
-void setupADC() {
-  PMC->PMC_PCER1 |= PMC_PCER1_PID37; // Active le périphérique ADC
-  ADC->ADC_MR = ADC_MR_PRESCAL(0) // Définit le diviseur de fréquence à 255
-  | ADC_MR_STARTUP_SUT64
-  | ADC_MR_TRACKTIM(15) // Définit le temps de suivi à 15 périodes d'ADC_CLK
-  | ADC_MR_SETTLING_AST3;
-  ADC->ADC_CHER = 0xC0; // Active le canal 7 (A0)
-  
-  // Configure Timer Counter 0 Channel 0 (TC0) pour samplingFrequency 
-  PMC->PMC_PCER0 |= PMC_PCER0_PID27; // Active le périphérique TC0 
-  TC0->TC_CHANNEL[0].TC_CMR = TC_CMR_TCCLKS_TIMER_CLOCK4 | TC_CMR_CPCTRG;
-  // Définit la source d'horloge à TCLK4 (MCK / 128, 84 MHz / 128 = 656.25 kHz)
-  // Définit la valeur RC pour une fréquence samplingFrequency Hz 
-  TC0->TC_CHANNEL[0].TC_RC = 20; // 32kHz -> ( MCK / 128 / 32000 ) -> 20.5078125 -> 20
-  // Active l'interruption de comparaison RC
-  TC0->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
-  // Active l'interruption TC0_IRQn dans le NVIC
-  NVIC_EnableIRQ(TC0_IRQn);
-  // activation du compteur
-  // activation du déclenchement logiciel
-  TC0->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
-}
-
-void setupDAC() {
-  PMC->PMC_PCER1 |= PMC_PCER1_PID38;
-  DACC->DACC_MR = DACC_MR_TRGEN_DIS
-  | DACC_MR_USER_SEL_CHANNEL1
-  | DACC_MR_WORD_HALF
-  | DACC_MR_REFRESH(1)
-  | DACC_MR_STARTUP_8
-  | DACC_MR_MAXS;
-  DACC->DACC_CHER = DACC_CHER_CH1;  // Activer le canal 1
-  NVIC_EnableIRQ(DACC_IRQn);
-}
-
-void TC0_Handler() {
-  // Lit le registre d'état pour effacer le drapeau d'interruption 
-  TC0->TC_CHANNEL[0].TC_SR;
-  
-  // Démarre une nouvelle conversion ADC
-  ADC->ADC_CR = ADC_CR_START;
-  
-  // Si buffer non plein, stocke les données ADC
-  if (recording && sampleIndex < BUFFER_SIZE) {
-    buffer[bufferIndex++] = ADC->ADC_CDR[7];
-    sampleIndex++;
-    if (bufferIndex >= BUFFER_SIZE) {
-      bufferReady = true;
-      bufferIndex = 0;
-      recording = false;
-      digitalWrite(LED1, HIGH);
-      digitalWrite(LED2, LOW);
-      Serial.println("Appel de transfertDATA");
-    }
-  }
-}
-
-void applyFIRFilter(uint16_t* inputBuffer, uint16_t* outputBuffer, int inputLength, int outputLength) {
-  for (int i = 0; i < outputLength; i++) {
-    float filteredSample = 0.0;
-    for (int j = 0; j < FILTER_TAP_NUM; j++) {
-      int bufferIndex = (i * DOWNSAMPLE_FACTOR + j) % inputLength;
-      filteredSample += firCoefficients[j] * inputBuffer[bufferIndex];
-    }
-    outputBuffer[i] = (uint16_t)filteredSample;
-  }
-}
-
-void downsample(uint16_t* inputBuffer, uint16_t* outputBuffer, int inputLength, int factor) {
-  int outputIndex = 0;
-  for (int i = 0; i < inputLength; i += factor) {
-    outputBuffer[outputIndex++] = inputBuffer[i];
-  }
-}
-
-void startRecording() {
-  unsigned long currentTime = millis();
-  if (currentTime - lastButtonPress > 200) { // Debounce check
-    lastButtonPress = currentTime;
-    if (!recording && !bufferReady) {
-      bufferIndex = 0;
-      sampleIndex = 0;
-      recording = true;
-      digitalWrite(LED1, LOW);
-      digitalWrite(LED2, HIGH);
-      Serial.println("Début de l’enregistrement");
-    }
-  }
-}
-
-void setup() {
-  Serial.begin(460800);
-  pinMode(PinTimer, OUTPUT);
-  pinMode(bouton, INPUT_PULLUP); // Bouton pour démarrer l'enregistrement
-  attachInterrupt(digitalPinToInterrupt(bouton), startRecording, FALLING);
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  setupADC();
-  setupDAC();
-
-  digitalWrite(LED1, HIGH);
-  digitalWrite(LED2, LOW);
-}
-
-void loop() {
-  if (bufferReady) {
-    if (applyFilter) {
-      applyFIRFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, OUTPUT_SIZE);
-    } else {
-      downsample((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
-    }
-
-    for (int i = 0; i < OUTPUT_SIZE; i++) {
-      Serial.println(downsampledBuffer[i]);
-      // DACC->DACC_CDR = DACC_CDR_DATA(downsampledBuffer[i]); // Décommenter si DAC utilisé
-    }
-    bufferReady = false;
-    digitalWrite(LED1, HIGH);
-    digitalWrite(LED2, LOW);
-    Serial.println("Enregistrement terminé");
-  }
-}
- */
-
-
-
-
-
-
-
-
-#include <Arduino.h>
-#include <math.h>
-
-#define BUFFER_SIZE 32000
-#define DOWNSAMPLE_FACTOR 4
-#define OUTPUT_SIZE (BUFFER_SIZE / DOWNSAMPLE_FACTOR)
-#define FRAME_SIZE 256
-#define OVERLAP_SIZE 128 // 50% overlap
-
-#define PinTimer 3
-#define FILTER_TAP_NUM 31
-
-volatile uint16_t buffer[BUFFER_SIZE];
-volatile uint16_t downsampledBuffer[OUTPUT_SIZE];
-volatile uint16_t bufferIndex = 0;
-volatile bool bufferReady = false;
-volatile int sampleIndex = 0;
-bool recording = false;
-bool applyFilter = true; // Variable pour activer/désactiver le filtre
-
-const int LED1 = 50;  // LED connectée à la pin D50
-const int LED2 = 51;  // LED connectée à la pin D51
-const int bouton = 2; // Utilise D2 comme bouton
-
-unsigned long lastButtonPress = 0; // Pour le debounce
-
 // Coefficients du filtre IIR
 float b[3], a[3];
 float w[2] = {0.0, 0.0};  // État du filtre
 
-void calculerMFCC(uint16_t* frame, float* mfcc) {
-  // Fonction placeholder pour calculer les MFCC pour une frame donnée
-  // Implémenter le calcul des MFCC ici
+// Déclarez un objet arduinoMFCC global
+arduinoMFCC mymfcc(MFCC_SIZE,DCT_MFCC_SIZE, FRAME_SIZE, FREQ_ECH);
+
+float mfcc[MFCC_SIZE];
+
+void calculerMFCC(float* frame, float* mfcc_coeffs) {
+    Serial.println("Début de calculerMFCC"); // Debug
+
+    // Utiliser la bibliothèque arduinoMFCC pour calculer les coefficients MFCC
+    mymfcc.compute(frame, mfcc_coeffs);
+
+    Serial.println("Calcul MFCC terminé"); // Debug
+
+    // Débogage : imprimer les coefficients MFCC calculés
+    for (int i = 0; i < MFCC_SIZE; i++) {
+        Serial.print("MFCC[");
+        Serial.print(i);
+        Serial.print("]: ");
+        Serial.println(mfcc_coeffs[i]);
+    }
+
+    Serial.println("Fin de calculerMFCC"); // Debug
 }
 
-void traiterFrames(uint16_t* buffer, int tailleBuffer, int tailleFrame, int tailleOverlap) {
-  int tailleStep = tailleFrame - tailleOverlap;
-  int nombreFrames = (tailleBuffer - tailleOverlap) / tailleStep;
-  float mfcc[13]; // Tableau placeholder pour les coefficients MFCC
+void traiterFrames(float* frameTest, int tailleFrame) {
+    Serial.println("Traitement de la frame test");
 
-  for (int i = 0; i < nombreFrames; i++) {
-    uint16_t frame[FRAME_SIZE];
-    memcpy(frame, &buffer[i * tailleStep], tailleFrame * sizeof(uint16_t));
-    
     // Vérification : Imprimer le contenu de la frame
-    Serial.print("Frame ");
-    Serial.print(i);
-    Serial.println(":");
-    for (int j = 0; j < FRAME_SIZE; j++) {
-      Serial.print(frame[j]);
-      Serial.print(" ");
+    Serial.println("Frame test:");
+    for (int j = 0; j < tailleFrame; j++) {
+        Serial.print(j);
+        Serial.print(": ");
+        Serial.print(frameTest[j]);
+        Serial.print(" ");
     }
     Serial.println();
 
-    calculerMFCC(frame, mfcc);
+    // Calculer les coefficients MFCC
+    calculerMFCC(frameTest, mfcc);
 
     // Sortie des coefficients MFCC (par exemple, imprimer sur Serial)
-    Serial.print("MFCC Frame ");
-    Serial.print(i);
-    Serial.print(": ");
-    for (int j = 0; j < 13; j++) {
-      Serial.print(mfcc[j]);
-      Serial.print(" ");
+    Serial.print("MFCC Frame test: ");
+    for (int j = 0; j < MFCC_SIZE; j++) {
+        Serial.print(mfcc[j]);
+        Serial.print(" ");
     }
     Serial.println();
-  }
+
+    Serial.println("Fin du traitement de la frame test");
 }
 
 void calculateIIRCoefficients(float cutoffFreq, float sampleRate) {
@@ -335,7 +193,7 @@ void startRecording() {
 }
 
 void setup() {
-  Serial.begin(460800);
+  Serial.begin(9600);
   pinMode(PinTimer, OUTPUT);
   pinMode(bouton, INPUT_PULLUP); // Bouton pour démarrer l'enregistrement
   attachInterrupt(digitalPinToInterrupt(bouton), startRecording, FALLING);
@@ -346,6 +204,25 @@ void setup() {
 
   // Calculer les coefficients du filtre IIR
   calculateIIRCoefficients(4000, 32000);
+
+  mymfcc.create_hamming_window();
+  mymfcc.create_mel_filter_bank();
+  mymfcc.create_dct_matrix();
+
+  // Frame de test
+  float frameTest[FRAME_SIZE] = {
+    6.00, 1591.00, 1568.00, 1708.00, 1669.00, 1680.00, 1670.00, 1614.00, 1690.00, 1641.00, 1623.00, 1588.00, 1659.00,
+    1537.00, 1382.00, 1360.00, 1304.00, 1402.00, 1221.00, 1411.00, 1447.00, 1488.00, 1506.00, 1428.00, 1467.00, 1504.00,
+    1570.00, 1659.00, 1820.00, 1891.00, 1981.00, 1933.00, 1953.00, 1846.00, 1863.00, 1778.00, 1751.00, 1758.00, 1596.00,
+    1562.00, 1628.00, 1495.00, 1409.00, 1397.00, 1412.00, 1303.00, 1479.00, 1401.00, 1608.00, 1564.00, 1614.00, 1773.00,
+    1732.00, 1838.00, 1917.00, 1822.00, 1721.00, 1730.00, 1701.00, 1574.00, 1693.00, 1543.00, 1540.00, 1397.00, 1383.00,
+    1381.00, 1373.00, 1273.00, 1474.00, 1351.00, 1487.00, 1482.00, 1517.00, 1433.00, 1637.00, 1479.00, 1524.00, 1411.00,
+    1393.00, 1456.00, 1428.00, 1437.00, 1453.00, 1518.00, 1460.00, 1524.00, 1398.00, 1372.00, 1341.00, 1395.00, 1494.00,
+    1352.00, 1366.00, 1398.00, 1526.00, 1603.00, 1632.00, 1624.00, 1678.00, 1634.00, 1766.00, 1606.00, 1673.00, 1592.00,
+    1624.00, 1537.00, 1319.00, 1345.00, 1511.00, 1624.00, 1576.00, 1618.00, 1648.00, 1511.00, 1539.00, 3.42
+  };
+
+  traiterFrames(frameTest, FRAME_SIZE);
 
   digitalWrite(LED1, HIGH);
   digitalWrite(LED2, LOW);
@@ -367,13 +244,15 @@ void setup() {
 } */
 
 void loop() {
-  if (bufferReady) {
+  /* if (bufferReady) {
+    Serial.println("Début du traitement du buffer");
     downsampleAndFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
-    traiterFrames((uint16_t*)downsampledBuffer, OUTPUT_SIZE, FRAME_SIZE, OVERLAP_SIZE);
-    
+    //traiterFrames((uint16_t*)downsampledBuffer, OUTPUT_SIZE, FRAME_SIZE, OVERLAP_SIZE);
+    traiterFrames(frameTest, FRAME_SIZE);
+
     bufferReady = false;
     digitalWrite(LED1, HIGH);
     digitalWrite(LED2, LOW);
-    Serial.println("Enregistrement terminé");
-  }
+    Serial.println("Enregistrement terminé et traitement des données terminé");
+  } */
 }
