@@ -313,6 +313,9 @@ const int LED1 = 50;  // LED connectée à la pin D50
 const int LED2 = 51;  // LED connectée à la pin D51
 const int bouton = 2; // Utilise D2 comme bouton
 
+bool infoFrame = false;
+bool infoMFCC = true;
+
 unsigned long lastButtonPress = 0; // Pour le debounce
 
 // Coefficients du filtre IIR
@@ -325,54 +328,69 @@ arduinoMFCC mymfcc(MFCC_SIZE,DCT_MFCC_SIZE, FRAME_SIZE, FREQ_ECH);
 float mfcc[MFCC_SIZE];
 
 void calculerMFCC(float* frame, float* mfcc_coeffs) {
-    Serial.println("Début de calculerMFCC"); // Debug
+    //Serial.println("Début de calculerMFCC"); // Debug
 
     // Utiliser la bibliothèque arduinoMFCC pour calculer les coefficients MFCC
     mymfcc.compute(frame, mfcc_coeffs);
 
-    Serial.println("Calcul MFCC terminé"); // Debug
+    if (infoMFCC)
+    {
+      Serial.println("Calcul MFCC terminé"); // Debug
+      // Débogage : imprimer les coefficients MFCC calculés
+      for (int i = 0; i < MFCC_SIZE; i++) {
+          Serial.print("MFCC[");
+          Serial.print(i);
+          Serial.print("]: ");
+          Serial.println(mfcc_coeffs[i]);
+      }
 
-    // Débogage : imprimer les coefficients MFCC calculés
-    for (int i = 0; i < MFCC_SIZE; i++) {
-        Serial.print("MFCC[");
-        Serial.print(i);
-        Serial.print("]: ");
-        Serial.println(mfcc_coeffs[i]);
+      Serial.println("Fin de calculerMFCC"); // Debug
     }
-
-    Serial.println("Fin de calculerMFCC"); // Debug
 }
 
-void traiterFrames(uint16_t* frameTest) {
-    Serial.println("Traitement de la frame test");
+void traiterFrames(uint16_t* buffer) {
+    int numFrames = (OUTPUT_SIZE - FRAME_SIZE) / OVERLAP_SIZE + 1;
+    for (int frameNum = 0; frameNum < numFrames; frameNum++) {
+        int startIndex = frameNum * OVERLAP_SIZE;
+        
+        // Copie de la frame actuelle dans frameTestFloat
+        float frameTestFloat[FRAME_SIZE];
+        for (int i = 0; i < FRAME_SIZE; i++) {
+          frameTestFloat[i] = buffer[startIndex + i];
+        }
 
-    float frameTestFloat[FRAME_SIZE];
-    for (int i = 0; i < FRAME_SIZE; i++) {
-      frameTestFloat[i] = frameTest[i];
+        if (infoFrame)
+        {
+          // Affichage de la frame actuelle
+          Serial.print("Frame ");
+          Serial.print(frameNum);
+          Serial.println(":");
+          for (int j = 0; j < FRAME_SIZE; j++) {
+              Serial.print(j);
+              Serial.print(": ");
+              Serial.print(buffer[startIndex + j]);
+              Serial.print(" ");
+          }
+          Serial.println();
+        }
+
+        // Calcul des coefficients MFCC
+        calculerMFCC(frameTestFloat, mfcc);
+
+        if (infoFrame){
+          // Affichage des coefficients MFCC
+          Serial.print("MFCC Frame ");
+          Serial.print(frameNum);
+          Serial.println(": ");
+          for (int j = 0; j < MFCC_SIZE; j++) {
+              Serial.print(mfcc[j]);
+              Serial.print(" ");
+          }
+          Serial.println();
+
+          Serial.println("Fin du traitement de la frame");
+        }
     }
-
-    // Vérification : Imprimer le contenu de la frame
-    Serial.println("Frame test:");
-    for (int j = 0; j < FRAME_SIZE; j++) {
-        Serial.print(j);
-        Serial.print(": ");
-        Serial.print(frameTest[j]);
-        Serial.print(" ");
-    }
-    Serial.println();
-
-    // Calculer les coefficients MFCC
-    calculerMFCC(frameTestFloat, mfcc);
-
-    // Sortie des coefficients MFCC (par exemple, imprimer sur Serial)
-    Serial.print("MFCC Frame test: ");
-    for (int j = 0; j < MFCC_SIZE; j++) {
-        Serial.print(mfcc[j]);
-        Serial.print(" ");
-    }
-    Serial.println();
-
-    Serial.println("Fin du traitement de la frame test");
 }
 
 void calculateIIRCoefficients(float cutoffFreq, float sampleRate) {
