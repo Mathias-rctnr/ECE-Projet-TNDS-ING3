@@ -15,7 +15,7 @@ def graphMFCC():
     n_mfcc = 13  # Number of MFCC coefficients
 
     # Load MFCC coefficients from text file
-    mfcc_path = 'MFCC.txt'  # Correct the path to your actual data file
+    mfcc_path = '/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/MFCC.txt'  # Correct the path to your actual data file
     mfcc_coeffs = np.loadtxt(mfcc_path)
 
     # Reshape the coefficients to the desired size
@@ -42,7 +42,7 @@ def main():
     print("Nom du port série: ", port)
 
     # Configure the serial port, replace 'COMx' with your Arduino's COM port
-    ser = serial.Serial(port, 9600)
+    ser = serial.Serial(port, 460800)
 
     # Chemin du fichier où écrire les données
     output_file_path = '/Users/mathiasrechsteiner/Desktop/Cours ING 3/Semestre 2/Traitement du Signal/MFCC.txt'
