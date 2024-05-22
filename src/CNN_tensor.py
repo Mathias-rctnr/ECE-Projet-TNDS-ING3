@@ -4,68 +4,100 @@ from tensorflow.keras import layers, models
 import time
 import DATA
 
-# Les données d'entraînement et de test (remplacer les ellipses avec vos données réelles)
+# Définition de l'utilisation des biais
+IS_BIASED = True
+
+# Activation de la précision en 32 bits pour les nombres flottants
+tf.keras.backend.set_floatx('float32')
+
+# Importation des données d'entraînement et de test
 training_data = DATA.training
 training_labels = np.array([0] * 50 + [1] * 50)
 test_data = DATA.test
 test_labels = np.array([0] * 5 + [1] * 5)
 
-# Convertir les données en tableaux NumPy
-training_data = np.array(training_data)
-test_data = np.array(test_data)
+# Assurez-vous de redimensionner testFinal correctement
+testFinal = DATA.dataTest
 
-# Redimensionnement des données d'entraînement et de test
-training_data = training_data.reshape((100, 48, 13, 1))
-test_data = test_data.reshape((10, 48, 13, 1))
+# Conversion et redimensionnement des données
+training_data = np.array(training_data).reshape((100, 48, 13, 1))
+test_data = np.array(test_data).reshape((10, 48, 13, 1))
+testFinal = np.array(testFinal).reshape((1, 48, 13, 1))  # Assurez-vous que testFinal a la bonne forme
 
-# Définition du modèle CNN
-model = models.Sequential()
-model.add(layers.Input(shape=(48, 13, 1)))
-model.add(layers.Conv2D(32, (3, 3), activation='relu'))
-model.add(layers.MaxPooling2D((2, 2)))
-model.add(layers.Conv2D(64, (3, 3), activation='relu'))
-model.add(layers.MaxPooling2D((2, 2)))
-model.add(layers.Flatten())
-model.add(layers.Dense(64, activation='relu'))
-model.add(layers.Dense(2, activation='softmax'))
+# Définition et compilation du modèle CNN
+model = models.Sequential([
+    layers.Input(shape=(48, 13, 1)),
+    layers.Conv2D(8, (3, 3), activation='relu'),  # Réduit à 8 filtres
+    layers.MaxPooling2D((2, 2)),
+    layers.Flatten(),
+    layers.Dense(16, activation='relu'),  # Réduit à 16 unités
+    layers.Dense(2, activation='softmax')
+])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
-# Compilation du modèle
-model.compile(optimizer='adam',
-              loss='sparse_categorical_crossentropy',
-              metrics=['accuracy'])
-
-# Entraînement du modèle
+# Entraînement et évaluation du modèle
 start_time = time.time()
-history = model.fit(training_data, training_labels, epochs=200, batch_size=5, validation_data=(test_data, test_labels))
+history = model.fit(training_data, training_labels, epochs=100, batch_size=5, validation_data=(test_data, test_labels))
 training_duration = time.time() - start_time
-
-# Évaluation du modèle
 test_loss, test_acc = model.evaluate(test_data, test_labels, verbose=2)
 
-# Calcul de la MSE sur les données d'entraînement et de test (pour l'affichage seulement)
-train_predictions = model.predict(training_data)
-test_predictions = model.predict(test_data)
-
-train_mse = np.mean((training_labels - np.argmax(train_predictions, axis=1))**2)
-test_mse = np.mean((test_labels - np.argmax(test_predictions, axis=1))**2)
-
-# Récapitulatif des informations importantes en français
+# Affichage des résultats
 print('\nRésumé de l\'entraînement :')
 print(f'Précision finale sur les données de test : {test_acc:.4f}')
 print(f'Perte finale sur les données de test : {test_loss:.4f}')
-print(f'MSE finale sur les données de test : {test_mse:.4f}')
 print(f'Durée totale de l\'entraînement : {training_duration:.2f} secondes')
-print(f'MSE finale sur les données d\'entraînement : {train_mse:.4f}')
-print(f'Nombre total de cycles (epochs) : {len(history.history["accuracy"])}')
 
-# Historique de l'entraînement
-#print('\nHistorique de l\'entraînement :')
-#print('Époque\tPrécision Entraînement\tPerte Entraînement\tPrécision Validation\tPerte Validation')
-#for epoch in range(len(history.history['accuracy'])):
-    #print(f'{epoch + 1}\t{history.history["accuracy"][epoch]:.4f}\t\t{history.history["loss"][epoch]:.4f}\t\t{history.history["val_accuracy"][epoch]:.4f}\t\t{history.history["val_loss"][epoch]:.4f}')
+# Rassembler tous les poids et biais dans des tableaux distincts
+all_weights = []
+all_biases = []
+for i, layer in enumerate(model.layers):
+    if len(layer.get_weights()) > 0:
+        weights, biases = layer.get_weights()
+        all_weights.append(weights)
+        all_biases.append(biases)
 
-# Vérification de la condition de validation
-if test_mse < 0.05:
-    print("Le modèle satisfait la condition de validation : MSE sur les données de test est inférieure à 0.05")
+# Fonction pour formater les poids et les biais en chaînes de caractères pour Arduino
+def format_for_arduino(data, name):
+    data_str = ", ".join(map(str, data))
+    return f"const float {name}[] = {{{data_str}}};"
+
+# Affichage des poids et des biais sous forme de tableaux distincts pour Arduino
+#print('\n// All weights')
+#print(format_for_arduino(all_weights, "model_weights"))
+#print('\n// All biases')
+#print(format_for_arduino(all_biases, "model_biases"))
+
+print()
+weights_biases = model.get_weights()
+
+if IS_BIASED:
+    print("#define _2_OPTIMIZE B00100000 // MULTIPLE_BIASES_PER_LAYER \n")
+    print('float biases[] = {')
+    for b in all_biases:
+        print('  ', end='')
+        for value in b:
+            print(value, end=', ')
+        print()
+    print('};\n')
 else:
-    print("Le modèle ne satisfait pas la condition de validation : MSE sur les données de test est supérieure ou égale à 0.05")
+    print("#define _2_OPTIMIZE B01000000 // NO_BIAS \n")
+
+print('float weights[] = {', end="")
+for w in all_weights:
+    print()
+    for row in w:
+        print('  ', end='')
+        for value in row.flatten():
+            print(value, end=', ')
+        print()
+print('};\n')
+
+# Utilisation de testFinal pour faire des prédictions
+predictions = model.predict(testFinal)
+print('\nPrédictions pour testFinal :')
+print(predictions)
+
+# Optionnel : Affichage de la classe prédite
+predicted_class = np.argmax(predictions, axis=-1)
+print('\nClasse prédite pour testFinal :')
+print(predicted_class)

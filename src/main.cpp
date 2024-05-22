@@ -5,7 +5,7 @@
 #include "NeuralNetwork.h"
 #include "poids.h"
 
-#define NumberOf(arg) ((unsigned int) (sizeof (arg) / sizeof (arg [0]))) // calculates the number of layers (in this case 4)
+#define NumberOf(arg) ((unsigned int)(sizeof(arg) / sizeof(arg[0]))) // calculates the number of layers (in this case 4)
 #define _1_OPTIMIZE B01010010
 #define BUFFER_SIZE 32000
 #define DOWNSAMPLE_FACTOR 4
@@ -31,7 +31,7 @@ extern const float weights[];
 //float biases[] = {};
 //float weights[] = {};
 
-const unsigned int layers[] = {780, 100, 50, 2};
+const unsigned int layers[] = {13, 48, 1};
 float *output; // 4th layer's output(s)
 
 NeuralNetwork NN(layers, const_cast<float*>(weights), const_cast<float*>(biases), NumberOf(layers));
@@ -66,13 +66,21 @@ arduinoMFCC mymfcc(MFCC_SIZE,DCT_MFCC_SIZE, FRAME_SIZE, FREQ_ECH);
 float mfcc[MFCC_SIZE];
 
 void Choix_Reseau(NeuralNetwork NN, float tabMFCC[ROWS][COLS]) {
-    for (int i = 0; i < 48; i++)  // Supposition que vous voulez traiter les 48 premières lignes
-    {
-        const float* input = tabMFCC[i];  // Pointeur vers le début de la ligne i du tableau
-        output = NN.FeedForward(input); // FeedForwards the input[i]-array through the NN  |  returns the predicted output(s)
-        Serial.println(output[0]);  // Affiche les résultats avec 7 chiffres après la virgule
+    float results[ROWS];
+    // Affichage des résultats ligne par ligne
+    Serial.println(NumberOf(tab_MFCC));
+    for (int i = 0; i < 48; i++) {
+      float *output = NN.FeedForward(tabMFCC[i]);
+      Serial.println(output[0]);
+      if(output[0]<0.5){
+        Serial.println("CERCLE");
+      }
+      else if(output[0]>=0.5){
+        Serial.println("CROIX");
+      }
     }
-    //NN.print();
+
+    free(tab_MFCC);
 }
 
 void calculerMFCC(float* frame, float* mfcc_coeffs, int frameNum) {
