@@ -1,6 +1,6 @@
 #!/Library/Frameworks/Python.framework/Versions/3.9/bin/python3
 import serial
-print("PySerial version:", serial.VERSION)
+#print("PySerial version:", serial.VERSION)
 
 import serial.tools.list_ports
 

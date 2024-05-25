@@ -5,7 +5,7 @@
 #include "NeuralNetwork.h"
 #include "poids.h"
 
-#define NumberOf(arg) ((unsigned int)(sizeof(arg) / sizeof(arg[0]))) // calculates the number of layers (in this case 4)
+#define NumberOf(arg) ((unsigned int) (sizeof (arg) / sizeof (arg [0]))) // calculates the number of layers (in this case 4)
 #define _1_OPTIMIZE B01010010
 #define BUFFER_SIZE 32000
 #define DOWNSAMPLE_FACTOR 4
@@ -25,16 +25,16 @@
 
 //!\ Réseau
 
+#define sigmoid
+
 extern const float biases[];
 extern const float weights[];
 
-//float biases[] = {};
+//const float biases[] = {};
 //float weights[] = {};
 
-const unsigned int layers[] = {13, 48, 1};
+const unsigned int layers[] = {1, 1, 1};
 float *output; // 4th layer's output(s)
-
-NeuralNetwork NN(layers, const_cast<float*>(weights), const_cast<float*>(biases), NumberOf(layers));
 
 //!\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
@@ -49,10 +49,17 @@ bool applyFilter = false; // Variable pour activer/désactiver le filtre
 
 const int LED1 = 50;  // LED connectée à la pin D50
 const int LED2 = 51;  // LED connectée à la pin D51
+const int LED_ROUGE = 49;
+const int LED_STOP = 43;
+const int BUZZER = 46;
 const int bouton = 2; // Utilise D2 comme bouton
+const int bouton_Alerte = 38;
+const int bouton_Stop = 39;
 
 bool infoFrame = false;
 bool infoMFCC = false;
+
+bool begin = false;
 
 unsigned long lastButtonPress = 0; // Pour le debounce
 
@@ -65,23 +72,7 @@ arduinoMFCC mymfcc(MFCC_SIZE,DCT_MFCC_SIZE, FRAME_SIZE, FREQ_ECH);
 
 float mfcc[MFCC_SIZE];
 
-void Choix_Reseau(NeuralNetwork NN, float tabMFCC[ROWS][COLS]) {
-    float results[ROWS];
-    // Affichage des résultats ligne par ligne
-    Serial.println(NumberOf(tab_MFCC));
-    for (int i = 0; i < 48; i++) {
-      float *output = NN.FeedForward(tabMFCC[i]);
-      Serial.println(output[0]);
-      if(output[0]<0.5){
-        Serial.println("CERCLE");
-      }
-      else if(output[0]>=0.5){
-        Serial.println("CROIX");
-      }
-    }
-
-    free(tab_MFCC);
-}
+NeuralNetwork NN(layers, const_cast<float*>(weights), const_cast<float*>(biases), NumberOf(layers));
 
 void calculerMFCC(float* frame, float* mfcc_coeffs, int frameNum) {
     // Utiliser la bibliothèque arduinoMFCC pour calculer les coefficients MFCC
@@ -102,12 +93,44 @@ void calculerMFCC(float* frame, float* mfcc_coeffs, int frameNum) {
       Serial.println("Fin de calculerMFCC"); // Debug
     }
     else{
-      Serial.print("Numero de frame ");
-      Serial.println(frameNum);
+      //Serial.print("Numero de frame ");
+      //Serial.println(frameNum);
       for (int i = 0; i < MFCC_SIZE; i++) {
         tab_MFCC[frameNum][i] = mfcc_coeffs[i]/10;
       }
     }
+}
+
+void Action(){
+  Serial.println("En attente d'une action...");
+  while(digitalRead(bouton_Alerte)==LOW && digitalRead(bouton_Stop)==LOW){
+    Serial.print(" ");
+    if(digitalRead(bouton_Alerte)==HIGH){
+    Serial.println("Alerte");
+    digitalWrite(LED_ROUGE, HIGH);
+    digitalWrite(LED_STOP, LOW);
+    digitalWrite(BUZZER, HIGH);
+    }
+    else if (digitalRead(bouton_Stop)==HIGH)
+    {
+      digitalWrite(LED_STOP, HIGH);
+      Serial.println("Stop");
+      digitalWrite(LED_ROUGE, LOW);
+      digitalWrite(BUZZER, HIGH);
+    }
+  }
+}
+
+void Choix_Reseau(NeuralNetwork NN, float tabMFCC[ROWS][COLS]) {
+
+  for (int i = 0; i < 48; i++)
+  {
+    float* output = NN.FeedForward(tabMFCC[i]); // FeedForward avec les données d'entrée
+    Serial.println(output[0]);
+  }
+
+  delete[] output;
+
 }
 
 void traiterFrames(uint16_t* buffer) {
@@ -136,15 +159,15 @@ void traiterFrames(uint16_t* buffer) {
           Serial.print("Frame ");
           Serial.print(frameNum);
           Serial.println(":");
-          /* for (int j = 0; j < FRAME_SIZE; j++) {
+          for (int j = 0; j < FRAME_SIZE; j++) {
               Serial.print(j);
               Serial.print(": ");
               Serial.print(buffer[startIndex + j]);
               Serial.print(" ");
-          } */
+          }
           Serial.println();
         }
-        free(buffer);
+        
 
         // Calcul des coefficients MFCC
         calculerMFCC(frameTestFloat, mfcc, frameNum);
@@ -163,6 +186,7 @@ void traiterFrames(uint16_t* buffer) {
           Serial.println("Fin du traitement de la frame");
         }
     }
+    free(buffer);
 
     for (int i = 0; i < ROWS; i++) {
         for (int j = 0; j < COLS; j++) {
@@ -171,7 +195,10 @@ void traiterFrames(uint16_t* buffer) {
         }
         Serial.println();  // Nouvelle ligne après chaque ligne de 13 valeurs
     }
-    Choix_Reseau(NN, tab_MFCC);
+    Serial.println("Sortie RESEAU");
+    //Choix_Reseau(NN, tab_MFCC);
+    free(tab_MFCC);
+    Action();
 }
 
 void calculateIIRCoefficients(float cutoffFreq, float sampleRate) {
@@ -262,6 +289,7 @@ void downsampleAndFilter(uint16_t* inputBuffer, uint16_t* outputBuffer, int inpu
       sample = applyIIRFilter(sample);
     }
     outputBuffer[outputIndex++] = (uint16_t)sample;
+    //Serial.println((uint16_t)sample);
   }
   free(inputBuffer);
 }
@@ -277,21 +305,32 @@ void startRecording() {
       recording = true;
       digitalWrite(LED1, LOW);
       digitalWrite(LED2, HIGH);
+      digitalWrite(BUZZER, LOW);
       Serial.println("Début de l’enregistrement");
     }
   }
 }
 
 void setup() {
-  //Serial.begin(460800);
-  Serial.begin(9600);
+  Serial.begin(460800);
+  //Serial.begin(9600);
   pinMode(PinTimer, OUTPUT);
   pinMode(bouton, INPUT_PULLUP); // Bouton pour démarrer l'enregistrement
   attachInterrupt(digitalPinToInterrupt(bouton), startRecording, FALLING);
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
+  pinMode(LED_ROUGE, OUTPUT);
+  pinMode(LED_STOP, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
   setupADC();
   setupDAC();
+
+  // Calculer les coefficients du filtre IIR
+  calculateIIRCoefficients(4000, 32000);
+
+  mymfcc.create_hamming_window();
+  mymfcc.create_mel_filter_bank();
+  mymfcc.create_dct_matrix();
 
   buffer = (uint16_t*) malloc(BUFFER_SIZE * sizeof(uint16_t));
   if (buffer == NULL) {
@@ -306,21 +345,42 @@ void setup() {
       // Gestion de l'échec d'allocation ici
   }
 
-  // Calculer les coefficients du filtre IIR
-  calculateIIRCoefficients(4000, 32000);
-
-  mymfcc.create_hamming_window();
-  mymfcc.create_mel_filter_bank();
-  mymfcc.create_dct_matrix();
-
   // Frame de test
 
   digitalWrite(LED1, HIGH);
   digitalWrite(LED2, LOW);
+  digitalWrite(LED_ROUGE, LOW);
+  digitalWrite(BUZZER, LOW);
+
+  if (digitalRead(bouton_Alerte)==HIGH || digitalRead(bouton_Stop)==HIGH)
+  {
+    Serial.println("Erreur bouton");
+  }
+
 }
 
 void loop() {
   if (bufferReady) {
+
+    if (begin==true)
+    {
+      NeuralNetwork NN(layers, const_cast<float*>(weights), const_cast<float*>(biases), NumberOf(layers));
+      buffer = (uint16_t*) malloc(BUFFER_SIZE * sizeof(uint16_t));
+      if (buffer == NULL) {
+          Serial.println("Échec de l'allocation de buffer");
+          // Gestion de l'échec d'allocation ici
+      }
+      
+      // Allocation pour le buffer de downsample
+      downsampledBuffer = (uint16_t*) malloc(OUTPUT_SIZE * sizeof(uint16_t));
+      if (downsampledBuffer == NULL) {
+          Serial.println("Échec de l'allocation de downsampledBuffer");
+          // Gestion de l'échec d'allocation ici
+      }
+    }
+
+    begin=true;
+    digitalWrite(BUZZER, LOW);
     Serial.println("Début du traitement du buffer");
     downsampleAndFilter((uint16_t*)buffer, (uint16_t*)downsampledBuffer, BUFFER_SIZE, DOWNSAMPLE_FACTOR);
     traiterFrames(downsampledBuffer);
